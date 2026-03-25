@@ -1,0 +1,160 @@
+최종코드
+
+
+import pygame
+import math
+
+pygame.init()
+
+WIDTH, HEIGHT = 800, 600
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("Collision Compare")
+
+clock = pygame.time.Clock()
+font = pygame.font.SysFont(None, 30)
+
+# 색상
+GRAY = (150, 150, 150)
+RED = (255, 0, 0)
+BLUE = (0, 0, 255)
+GREEN = (0, 255, 0)
+BLACK = (0, 0, 0)
+
+# 이동 사각형
+rect1 = pygame.Rect(100, 200, 150, 100)
+
+# 회전 사각형
+rect2_size = (150, 100)
+rect2_surf = pygame.Surface(rect2_size, pygame.SRCALPHA)
+rect2_surf.fill(GRAY)
+
+rect2_center = (WIDTH//2, HEIGHT//2)
+angle = 0
+rotation_speed = 1
+
+speed = 3
+
+# ---------------- SAT ----------------
+def get_axes(points):
+    axes = []
+    for i in range(len(points)):
+        p1 = points[i]
+        p2 = points[(i + 1) % len(points)]
+        edge = (p2[0] - p1[0], p2[1] - p1[1])
+        normal = (-edge[1], edge[0])
+        length = math.hypot(normal[0], normal[1])
+        axes.append((normal[0]/length, normal[1]/length))
+    return axes
+
+def project(points, axis):
+    dots = [p[0]*axis[0] + p[1]*axis[1] for p in points]
+    return min(dots), max(dots)
+
+def overlap(a, b):
+    return a[0] <= b[1] and b[0] <= a[1]
+
+def sat_collision(poly1, poly2):
+    axes = get_axes(poly1) + get_axes(poly2)
+    for axis in axes:
+        if not overlap(project(poly1, axis), project(poly2, axis)):
+            return False
+    return True
+
+def get_rect_points(rect):
+    return [
+        (rect.left, rect.top),
+        (rect.right, rect.top),
+        (rect.right, rect.bottom),
+        (rect.left, rect.bottom)
+    ]
+
+# ---------------- 루프 ----------------
+running = True
+while running:
+    clock.tick(60)
+
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            running = False
+
+    # 이동
+    keys = pygame.key.get_pressed()
+    if keys[pygame.K_LEFT]: rect1.x -= speed
+    if keys[pygame.K_RIGHT]: rect1.x += speed
+    if keys[pygame.K_UP]: rect1.y -= speed
+    if keys[pygame.K_DOWN]: rect1.y += speed
+
+    # 회전 속도
+    rotation_speed = 3 if keys[pygame.K_z] else 1
+    angle += rotation_speed
+
+    # 회전 처리
+    rotated_surf = pygame.transform.rotate(rect2_surf, angle)
+    rotated_rect = rotated_surf.get_rect(center=rect2_center)
+
+    # ---------------- OBB 점 ----------------
+    w, h = rect2_size
+    cx, cy = rect2_center
+
+    corners = [(-w//2, -h//2), (w//2, -h//2), (w//2, h//2), (-w//2, h//2)]
+    rad = math.radians(angle)
+
+    rotated_points = []
+    for x, y in corners:
+        rx = x * math.cos(rad) - y * math.sin(rad)
+        ry = x * math.sin(rad) + y * math.cos(rad)
+        rotated_points.append((cx + rx, cy + ry))
+
+    obb1 = get_rect_points(rect1)
+
+    # ---------------- 충돌 계산 ----------------
+    # Circle
+    c1 = rect1.center
+    c2 = rotated_rect.center
+    r1 = rect1.width // 2
+    r2 = rect2_size[0] // 2
+
+    dx = c1[0] - c2[0]
+    dy = c1[1] - c2[1]
+    collision_circle = (dx*dx + dy*dy) <= (r1 + r2)**2
+
+    # AABB
+    collision_aabb = rect1.colliderect(rotated_rect)
+
+    # OBB (SAT)
+    collision_obb = sat_collision(obb1, rotated_points)
+
+    # ---------------- 배경 ----------------
+    screen.fill(BLACK)
+
+    # ---------------- 오브젝트 ----------------
+    pygame.draw.rect(screen, GRAY, rect1)
+    screen.blit(rotated_surf, rotated_rect)
+
+    # AABB (빨간)
+    pygame.draw.rect(screen, RED, rect1, 2)
+    pygame.draw.rect(screen, RED, rotated_rect, 2)
+
+    # Circle (파란)
+    pygame.draw.circle(screen, BLUE, c1, r1, 2)
+    pygame.draw.circle(screen, BLUE, c2, r2, 2)
+
+    # OBB (초록)
+    pygame.draw.polygon(screen, GREEN, rotated_points, 2)
+
+    # ---------------- 텍스트 ----------------
+    circle_text = "Circle: HIT" if collision_circle else "Circle: MISS"
+    aabb_text = "AABB: HIT" if collision_aabb else "AABB: MISS"
+    obb_text = "OBB: HIT" if collision_obb else "OBB: MISS"
+
+    t1 = font.render(circle_text, True, BLUE)
+    t2 = font.render(aabb_text, True, RED)
+    t3 = font.render(obb_text, True, GREEN)
+
+    screen.blit(t1, (10, 10))
+    screen.blit(t2, (10, 40))
+    screen.blit(t3, (10, 70))
+
+    pygame.display.flip()
+
+pygame.quit()
