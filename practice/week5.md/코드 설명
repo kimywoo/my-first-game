@@ -1,0 +1,62 @@
+코드 설명 : 
+ 1️⃣ 게임 루프 — while 문 위치
+
+게임의 핵심 루프는 여기야:
+
+def main():
+    ...
+    while True:
+        clock.tick(FPS)
+
+👉 이 while True:가 게임이 계속 돌아가게 만드는 메인 루프야.
+
+이 안에서:
+
+이벤트 처리
+입력 처리
+게임 상태 업데이트
+화면 그리기
+
+가 전부 반복 실행됨.
+
+2️⃣ 플레이어 이동 — 키 입력 처리 위치
+
+키 입력은 여기에서 처리되고 있어:
+
+keys = pygame.key.get_pressed()
+
+if keys[pygame.K_LEFT]  and player.left  > 0:      player.x -= 6
+if keys[pygame.K_RIGHT] and player.right < WIDTH:   player.x += 6
+if keys[pygame.K_UP]    and player.top   > 0:      player.y -= 6
+if keys[pygame.K_DOWN]  and player.bottom < HEIGHT: player.y += 6
+
+👉 설명:
+
+pygame.key.get_pressed() → 현재 눌린 키 상태 가져옴
+방향키 입력에 따라 player.x, player.y를 직접 변경
+
+즉, 플레이어 이동 로직은 게임 루프 안에서 매 프레임마다 실행됨
+
+3️⃣ 충돌 감지 — colliderect() 위치
+💥 총알 vs 적 충돌
+for bi, b in enumerate(bullets):
+    for ei, en in enumerate(enemies):
+        if b.colliderect(en):
+
+👉 여기서:
+
+b.colliderect(en) → 총알과 적이 겹쳤는지 체크
+맞으면 점수 증가 + 제거 처리
+💥 플레이어 vs 적 충돌
+for en in enemies:
+    if player.colliderect(en):
+
+👉 여기서:
+
+플레이어와 적 충돌 감지
+목숨 감소 + 무적 시간 처리
+🔥 핵심 정리
+기능	위치
+게임 루프	while True: inside main()
+이동 처리	pygame.key.get_pressed() 아래
+충돌 감지	colliderect() 사용하는 두 부분
