@@ -1,0 +1,780 @@
+
+import pygame, random, sys, os, math, base64, io
+
+# 초기화
+pygame.init()
+pygame.mixer.init()
+WIDTH, HEIGHT = 1920, 1080
+FPS = 60
+
+# 색상
+WHITE, RED, GREEN, YELLOW, BLUE, GRAY, ORANGE = (255,255,255), (220,50,50), (0,200,0), (240,220,0), (50,150,255), (20,20,40), (255,100,0)
+BLACK = (0, 0, 0)
+SAND_COLOR = (210, 180, 140)
+SAND_DUST = (194, 161, 113)
+DESERT_SKY = (210, 160, 80)
+DESERT_GROUND = (185, 140, 85)
+DESERT_DARK = (160, 110, 60)
+
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("Desert Tank")
+clock = pygame.time.Clock()
+
+# 폰트 설정
+try:
+    font = pygame.font.SysFont("malgungothic", 28)
+    font_small = pygame.font.SysFont("malgungothic", 22)
+    font_big = pygame.font.SysFont("malgungothic", 90)
+    font_menu = pygame.font.SysFont("malgungothic", 52)
+    font_warn = pygame.font.SysFont("malgungothic", 120, bold=True)
+except:
+    font = pygame.font.SysFont("arial", 28)
+    font_small = pygame.font.SysFont("arial", 22)
+    font_big = pygame.font.SysFont("arial", 90)
+    font_menu = pygame.font.SysFont("arial", 52)
+    font_warn = pygame.font.SysFont("arial", 120, bold=True)
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 사운드 로드
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+def load_sound(filename, volume=0.18):
+    try:
+        path = os.path.join(os.path.dirname(__file__), filename)
+        snd = pygame.mixer.Sound(path)
+        snd.set_volume(volume)
+        return snd
+    except Exception as e:
+        print(f"사운드 로드 실패 {filename}: {e}")
+        return None
+
+snd_tankmove = None
+snd_missile = None
+snd_ammo = None
+tankmove_channel = None
+ammo_channel = None
+
+def init_sounds():
+    global snd_tankmove, snd_missile, snd_ammo, tankmove_channel, ammo_channel
+    snd_tankmove = load_sound("tankmove.wav", 0.12)
+    snd_missile  = load_sound("missile.wav",  0.15)
+    snd_ammo     = load_sound("ammo.wav",     0.10)
+    tankmove_channel = pygame.mixer.Channel(1)
+    ammo_channel     = pygame.mixer.Channel(2)  # 총알 전용 채널 (중첩 방지)
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# BGM 함수
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+def play_intro_music():
+    try:
+        path = os.path.join(os.path.dirname(__file__), "intro.mp3")
+        pygame.mixer.music.load(path)
+        pygame.mixer.music.set_volume(0.5)
+        pygame.mixer.music.play(-1)
+    except Exception as e:
+        print(f"인트로 BGM 실패: {e}")
+
+def play_bgm():
+    try:
+        path = os.path.join(os.path.dirname(__file__), "bgm1.mp3")
+        pygame.mixer.music.load(path)
+        pygame.mixer.music.set_volume(0.3)
+        pygame.mixer.music.play(-1)
+    except Exception as e:
+        print(f"BGM 로드 실패: {e}")
+
+def play_boss_music():
+    try:
+        path = os.path.join(os.path.dirname(__file__), "boss.mp3")
+        pygame.mixer.music.load(path)
+        pygame.mixer.music.set_volume(0.4)
+        pygame.mixer.music.play(-1)
+    except Exception as e:
+        print(f"보스 BGM 실패: {e}")
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 인트로 화면
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+def draw_desert_bg_intro(tick):
+    """사막 인트로 배경 - 황토색 모래언덕"""
+    # 하늘 그라데이션
+    for y in range(HEIGHT // 2):
+        ratio = y / (HEIGHT // 2)
+        r = int(180 + ratio * 40)
+        g = int(100 + ratio * 60)
+        b = int(30 + ratio * 20)
+        pygame.draw.line(screen, (r, g, b), (0, y), (WIDTH, y))
+
+    # 땅
+    for y in range(HEIGHT // 2, HEIGHT):
+        ratio = (y - HEIGHT // 2) / (HEIGHT // 2)
+        r = int(185 - ratio * 20)
+        g = int(140 - ratio * 20)
+        b = int(85 - ratio * 15)
+        pygame.draw.line(screen, (r, g, b), (0, y), (WIDTH, y))
+
+    # 모래언덕들
+    dune_data = [(0, HEIGHT//2 + 80, 500, 140), (400, HEIGHT//2 + 40, 700, 180),
+                 (900, HEIGHT//2 + 60, 600, 160), (1400, HEIGHT//2 + 50, 700, 170),
+                 (1800, HEIGHT//2 + 80, 400, 130)]
+    for (dx, dy, dw, dh) in dune_data:
+        pts = [(dx, HEIGHT), (dx + dw//2, dy), (dx + dw, HEIGHT)]
+        pygame.draw.polygon(screen, (200, 155, 95), pts)
+        pygame.draw.polygon(screen, (215, 170, 110), [(dx, HEIGHT), (dx + dw//2, dy), (dx + dw//2 + 30, dy + 20), (dx, HEIGHT)])
+
+    # 움직이는 모래 입자
+    random.seed(tick // 4)
+    for _ in range(60):
+        px = random.randint(0, WIDTH)
+        py = random.randint(HEIGHT//2, HEIGHT)
+        pygame.draw.circle(screen, (220, 185, 130), (px, py), random.randint(1, 3))
+
+    # 태양
+    sun_x, sun_y = WIDTH - 180, 120
+    for r in range(80, 30, -5):
+        alpha_ratio = (80 - r) / 50
+        color = (255, int(200 + alpha_ratio * 55), int(alpha_ratio * 80))
+        pygame.draw.circle(screen, color, (sun_x, sun_y), r)
+    pygame.draw.circle(screen, (255, 240, 180), (sun_x, sun_y), 50)
+
+def show_intro():
+    play_intro_music()
+
+    try:
+        logo_path = os.path.join(os.path.dirname(__file__), "intro.png")
+        logo_img = pygame.image.load(logo_path).convert_alpha()
+        logo_img = pygame.transform.scale(logo_img, (1100, 480))  # 더 크게
+    except:
+        logo_img = None
+
+    menu_items = ["PLAY", "CREDIT", "QUIT"]
+    selected = 0
+    tick = 0
+
+    while True:
+        tick += 1
+        draw_desert_bg_intro(tick)
+
+        # 로고
+        if logo_img:
+            logo_rect = logo_img.get_rect(center=(WIDTH // 2, 300))
+            screen.blit(logo_img, logo_rect)
+        else:
+            # 황토빛 텍스트 그림자
+            shadow = font_big.render("DESERT TANK", True, (120, 70, 10))
+            screen.blit(shadow, shadow.get_rect(center=(WIDTH // 2 + 4, 304)))
+            title = font_big.render("DESERT TANK", True, YELLOW)
+            screen.blit(title, title.get_rect(center=(WIDTH // 2, 300)))
+
+        # 메뉴 배경 반투명
+        menu_bg = pygame.Surface((500, 360), pygame.SRCALPHA)
+        menu_bg.fill((20, 10, 0, 140))
+        screen.blit(menu_bg, menu_bg.get_rect(center=(WIDTH // 2, 700)))
+
+        # 메뉴 버튼
+        for i, item in enumerate(menu_items):
+            if i == selected:
+                color = YELLOW
+                size = 64
+            else:
+                color = (200, 170, 120)
+                size = 52
+
+            try:
+                f = pygame.font.SysFont("malgungothic", size, bold=(i == selected))
+            except:
+                f = pygame.font.SysFont("arial", size, bold=(i == selected))
+
+            text = f.render(item, True, color)
+            rect = text.get_rect(center=(WIDTH // 2, 590 + i * 110))
+            screen.blit(text, rect)
+
+            if i == selected:
+                arrow = f.render("▶", True, YELLOW)
+                screen.blit(arrow, (rect.left - 60, rect.top))
+
+        guide = font_small.render("↑↓ 방향키로 선택   ENTER로 확인", True, (180, 150, 100))
+        screen.blit(guide, guide.get_rect(center=(WIDTH // 2, 1020)))
+
+        pygame.display.flip()
+        clock.tick(FPS)
+
+        for e in pygame.event.get():
+            if e.type == pygame.QUIT:
+                pygame.quit(); sys.exit()
+            if e.type == pygame.KEYDOWN:
+                if e.key == pygame.K_UP:
+                    selected = (selected - 1) % len(menu_items)
+                if e.key == pygame.K_DOWN:
+                    selected = (selected + 1) % len(menu_items)
+                if e.key == pygame.K_RETURN:
+                    if selected == 0:
+                        pygame.mixer.music.stop()
+                        screen.fill(BLACK)  # 잔상 제거
+                        pygame.display.flip()
+                        pygame.time.delay(80)
+                        return "play"
+                    elif selected == 1:
+                        show_credit()
+                    elif selected == 2:
+                        pygame.quit(); sys.exit()
+
+def show_credit():
+    while True:
+        screen.fill(BLACK)
+        lines = [
+            "[ CREDIT ]", "",
+            "Game Design & Programming", "by You :)", "",
+            "Graphics & Assets", "Custom Made", "",
+            "Music", "bgm1.mp3 / intro.mp3 / boss.mp3", "",
+            "ESC 키를 눌러 돌아가기",
+        ]
+        for i, line in enumerate(lines):
+            try:
+                f = pygame.font.SysFont("malgungothic", 40 if i == 0 else 32)
+            except:
+                f = pygame.font.SysFont("arial", 40 if i == 0 else 32)
+            color = YELLOW if i == 0 else WHITE
+            text = f.render(line, True, color)
+            screen.blit(text, text.get_rect(center=(WIDTH // 2, 200 + i * 60)))
+        pygame.display.flip()
+        clock.tick(FPS)
+        for e in pygame.event.get():
+            if e.type == pygame.QUIT:
+                pygame.quit(); sys.exit()
+            if e.type == pygame.KEYDOWN:
+                if e.key == pygame.K_ESCAPE:
+                    return
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 데이터 로드
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+def load_frames(filename, size):
+    path = os.path.join(os.path.dirname(__file__), filename)
+    if not os.path.exists(path):
+        frames = []
+        for _ in range(4):
+            dummy = pygame.Surface(size, pygame.SRCALPHA)
+            pygame.draw.rect(dummy, GRAY, (0, 0, size[0], size[1]), 2)
+            frames.append(dummy)
+        return frames
+    try:
+        sheet = pygame.image.load(path).convert_alpha()
+        sw, sh = sheet.get_size()
+        fw, fh = sw // 2, sh // 2
+        frames = []
+        for i in range(4):
+            row, col = divmod(i, 2)
+            rect = pygame.Rect(col * fw, row * fh, fw, fh)
+            frames.append(pygame.transform.scale(sheet.subsurface(rect), size))
+        return frames
+    except:
+        surf = pygame.Surface(size, pygame.SRCALPHA)
+        return [surf] * 4
+
+def load_boss2_from_b64(b64_str, size):
+    try:
+        sheet_bytes = base64.b64decode(b64_str)
+        sheet = pygame.image.load(io.BytesIO(sheet_bytes)).convert_alpha()
+        fw, fh = 200, 200
+        frames = []
+        for i in range(4):
+            row, col = divmod(i, 2)
+            rect = pygame.Rect(col * fw, row * fh, fw, fh)
+            frames.append(pygame.transform.scale(sheet.subsurface(rect), size))
+        return frames
+    except:
+        return load_frames("boss2.png", size)
+
+BOSS2_SHEET_B64 = "iVBORw0KGgoAAAANSUhEUgAAAZAAAAGQCAYAAACAvzbMAAAQAElEQVR4Aezdy6tlR6EG8N0XAsIV/A8CKskk6MChPRAcGFQElQwSMANnBjJwEBxcELkOHGUgEkx0YA9EEjU+QMxjIjpoR6JEboMmaEsIgqgkkkACGfTNtzt1snpnn8fee+1VVWv9xDq1HrWrav1qVb4+3Umf/1r5HwECBAgQ2ENAgOyB5iMECBAgsFoJEG8BgVoCxiXQuYAA6XwBTZ8AAQK1BARILXnjEiBAoHOBjgOkc3nTJ0CAQOcCAqTzBTR9AgQI1BIQILXkjUugYwFTJxABARIFhQABAgR2FhAgO5P5AAECBAhEQIBEYepiPAIECMxAQIDMYBE9AgECBGoICJAa6sYkQKCWgHFHFBAgI2LqigABAksSECBLWm3PSoAAgREFBMiImEvoyjMSIECgCAiQIqEmQIAAgZ0EBMhOXBoTIECglkB74wqQ9tbEjAgQINCFgADpYplMkgABAu0JCJD21sSMjiOgVwIERhYQICOD6o4AAQJLERAgS1lpz0mAAIGRBS4cICOPqzsCBAgQ6FxAgHS+gKZPgACBWgICpJa8cQlcWEBDAm0KCJA218WsCBAg0LyAAGl+iUyQAAECbQosIUDalDcrAgQIdC4gQDpfQNMnQIBALQEBUkveuASWIOAZZy0gQGa9vB6OAAECxxMQIMez1TMBAgRmLSBAml5ekyNAgEC7AgKk3bUxMwIECDQtIECaXh6TI0CgloC BAgQIERhYQICOD6o4AAQJLERAgS1lpz0mAAIGRBS4cICOPqzsCBAgQ6FxAgHS+gKZPgACBWgICpJa8cQlcWEBDAm0KCJA218WsCBAg0LyAAGl+iUyQAAECbQosIUDalDcrAgQIdC4gQDpfQNMnQIBALQEBUkveuASWIOAZZy0gQGa9vB6OAAECxxMQIMez1TMBAgRmLSBAml5ekyNAgEC7AgKk3bUxMwIECDQtIECaXh6TI0CgloC"
+
+player_frames = load_frames("ww2.png", (260, 260))
+enemy_frames = load_frames("enemy1.png", (200, 200))
+boss1_frames = load_frames("boss1.png", (520, 520))   # 더 크게
+boss2_frames = load_boss2_from_b64(BOSS2_SHEET_B64, (600, 600))  # 더 크게
+
+try:
+    ammo_path = os.path.join(os.path.dirname(__file__), "ammo.png")
+    raw_ammo_img = pygame.image.load(ammo_path).convert_alpha()
+    rotated_ammo = pygame.transform.rotate(raw_ammo_img, -90)
+    ammo_img = pygame.transform.scale(rotated_ammo, (80, 100))
+except:
+    ammo_img = pygame.Surface((80, 100), pygame.SRCALPHA)
+    pygame.draw.rect(ammo_img, ORANGE, (0, 0, 80, 100))
+
+BOSS3_AMMO_SIZE = (80, 120)
+try:
+    boss3_ammo_path = os.path.join(os.path.dirname(__file__), "boss3ammo.png")
+    raw_boss3_ammo_img = pygame.image.load(boss3_ammo_path).convert_alpha()
+    boss3_ammo_img = pygame.transform.scale(raw_boss3_ammo_img, BOSS3_AMMO_SIZE)
+except:
+    boss3_ammo_img = pygame.Surface(BOSS3_AMMO_SIZE, pygame.SRCALPHA)
+    pygame.draw.rect(boss3_ammo_img, BLUE, (0, 0, BOSS3_AMMO_SIZE[0], BOSS3_AMMO_SIZE[1]))
+    pygame.draw.circle(boss3_ammo_img, WHITE, (BOSS3_AMMO_SIZE[0]//2, BOSS3_AMMO_SIZE[1]//4), BOSS3_AMMO_SIZE[0]//4)
+
+boss3_frames = []
+try:
+    path = os.path.join(os.path.dirname(__file__), "boss3.png")
+    boss3_sheet = pygame.image.load(path).convert_alpha()
+    for i in range(4):
+        row, col = divmod(i, 2)
+        rect = pygame.Rect(col * 200, row * 200, 200, 200)
+        boss3_frames.append(pygame.transform.scale(boss3_sheet.subsurface(rect), (620, 620)))  # 더 크게
+except:
+    for _ in range(4):
+        dummy = pygame.Surface((620, 620), pygame.SRCALPHA)
+        pygame.draw.rect(dummy, BLUE, (0, 0, 620, 620))
+        boss3_frames.append(dummy)
+
+# 호위 전투기 이미지 (boss2.png 재사용, 작게)
+escort_frames = load_boss2_from_b64(BOSS2_SHEET_B64, (200, 200))
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# WARNING 애니메이션 (파이널 보스)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+def show_final_boss_warning():
+    """BGM 페이드아웃 → WARNING 배너 + shadow.png 웅장하게 내려오기 → 보스 BGM"""
+    # BGM 서서히 페이드아웃
+    for vol in range(30, -1, -2):
+        pygame.mixer.music.set_volume(vol / 100)
+        pygame.time.delay(20)
+    pygame.mixer.music.stop()
+
+    # shadow.png 로드 - 화면 전체보다 크게 (1400x1400)
+    try:
+        shadow_path = os.path.join(os.path.dirname(__file__), "shadow.png")
+        shadow_img = pygame.image.load(shadow_path).convert_alpha()
+        shadow_img = pygame.transform.scale(shadow_img, (1400, 1400))
+    except:
+        shadow_img = None
+
+    SHADOW_W, SHADOW_H = 1400, 1400
+    SHADOW_START_Y = -SHADOW_H          # 완전히 화면 위 바깥
+    SHADOW_END_Y   = -SHADOW_H // 2 + 80  # 절반 정도 내려와서 상단에 걸쳐 보임
+
+    # 줄무늬 배너 미리 생성
+    stripe_w = 80
+    stripe_surf = pygame.Surface((WIDTH + 300, 120), pygame.SRCALPHA)
+    col_idx = 0
+    for sx in range(0, WIDTH + 500, stripe_w):
+        color = (200, 0, 0, 220) if col_idx % 2 == 0 else (15, 15, 15, 220)
+        pts = [(sx - 30, 0), (sx - 30 + stripe_w, 0), (sx + stripe_w, 120), (sx, 120)]
+        pygame.draw.polygon(stripe_surf, color, pts)
+        col_idx += 1
+
+    try:
+        wf = pygame.font.SysFont("malgungothic", 110, bold=True)
+        sf = pygame.font.SysFont("malgungothic", 38, bold=True)
+    except:
+        wf = pygame.font.SysFont("arial", 110, bold=True)
+        sf = pygame.font.SysFont("arial", 38, bold=True)
+
+    # 총 4.5초 — 그림자가 천천히 내려와 상단에 멈추는 시간 확보
+    TOTAL      = int(FPS * 4.5)
+    # 그림자는 처음 60% 시간 동안 내려오고 나머지는 멈춰있음
+    MOVE_END_T = 0.60
+    BANNER_Y   = HEIGHT // 2 - 60
+
+    game_snapshot = screen.copy()
+
+    for frame in range(TOTAL):
+        t = frame / TOTAL  # 0.0 → 1.0
+
+        # ── 배경: 게임 스냅샷 → 점점 검게 ──
+        dark_alpha = min(int(t * 210), 210)
+        screen.blit(game_snapshot, (0, 0))
+        dark_overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        dark_overlay.fill((0, 0, 0, dark_alpha))
+        screen.blit(dark_overlay, (0, 0))
+
+        # ── shadow.png: 천천히 내려와서 상단에 멈춤 ──
+        if shadow_img:
+            # move_t: 0→1 (MOVE_END_T 이후엔 1.0 고정)
+            raw_t = min(t / MOVE_END_T, 1.0)
+            # ease-out cubic — 천천히 감속하며 멈추는 느낌
+            ease_t = 1.0 - (1.0 - raw_t) ** 3.0
+
+            sy = int(SHADOW_START_Y + ease_t * (SHADOW_END_Y - SHADOW_START_Y))
+
+            # 알파: 처음 30% 동안 서서히 나타남
+            alpha_t = min(t / 0.30, 1.0)
+            shadow_alpha = int(alpha_t * 255)
+
+            s_copy = shadow_img.copy()
+            s_copy.set_alpha(shadow_alpha)
+            screen.blit(s_copy, (WIDTH // 2 - SHADOW_W // 2, sy))
+
+        # ── 줄무늬 배너 슬라이드인 ──
+        slide_t = min(t / 0.20, 1.0)
+        slide_x = int((1.0 - slide_t) * -WIDTH)
+
+        screen.blit(stripe_surf, (slide_x, BANNER_Y - 120))
+        screen.blit(stripe_surf, (slide_x, BANNER_Y + 80))
+        pygame.draw.rect(screen, WHITE, (slide_x, BANNER_Y - 120, WIDTH, 120), 2)
+        pygame.draw.rect(screen, WHITE, (slide_x, BANNER_Y + 80,  WIDTH, 120), 2)
+
+        # ── WARNING 텍스트 ──
+        blink_on = (frame % 26) < 20
+        if blink_on:
+            center_bg = pygame.Surface((WIDTH, 200), pygame.SRCALPHA)
+            center_bg.fill((100, 0, 0, 190))
+            screen.blit(center_bg, (0, BANNER_Y - 100))
+
+            for ox, oy in [(-3,0),(3,0),(0,-3),(0,3),(-2,-2),(2,2)]:
+                outline = wf.render("⚠  WARNING  ⚠", True, (60, 0, 0))
+                screen.blit(outline, outline.get_rect(center=(WIDTH//2 + ox, BANNER_Y + oy)))
+            warn_text = wf.render("⚠  WARNING  ⚠", True, (255, 55, 55))
+            screen.blit(warn_text, warn_text.get_rect(center=(WIDTH // 2, BANNER_Y)))
+
+            sub_text = sf.render("FINAL BOSS IS APPROACHING", True, (255, 200, 100))
+            screen.blit(sub_text, sub_text.get_rect(center=(WIDTH // 2, BANNER_Y + 90)))
+
+        pygame.display.flip()
+        clock.tick(FPS)
+
+        for e in pygame.event.get():
+            if e.type == pygame.QUIT:
+                pygame.quit(); sys.exit()
+
+    play_boss_music()
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 엔드 스크린
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+def show_end_screen(text, subtext, color):
+    pygame.mixer.music.stop()
+    pygame.mixer.stop()   # 모든 채널 사운드 즉시 정지 (총알 소리 포함)
+    while True:
+        screen.fill((10, 10, 30))
+        t = font_big.render(text, True, color)
+        s = font.render(subtext, True, WHITE)
+        screen.blit(t, (WIDTH//2 - t.get_width()//2, HEIGHT//2 - 50))
+        screen.blit(s, (WIDTH//2 - s.get_width()//2, HEIGHT//2 + 60))
+        pygame.display.flip()
+        for e in pygame.event.get():
+            if e.type == pygame.QUIT: pygame.quit(); sys.exit()
+            if e.type == pygame.KEYDOWN:
+                if e.key == pygame.K_r:
+                    play_bgm()
+                    return True
+                if e.key == pygame.K_q:
+                    pygame.quit(); sys.exit()
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 메인 게임 루프
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+def main():
+    init_sounds()
+
+    player = pygame.Rect(WIDTH//2 - 20, HEIGHT - 160, 40, 40)
+    bullets, missiles, enemies, explosions = [], [], [], []
+
+    boss1, boss1_hp, boss1_max, boss1_bombs, boss1_timer = None, 35, 35, [], 0
+    boss2, boss2_hp, boss2_max, boss2_bombs, boss2_timer, boss2_dir = None, 50, 50, [], 0, 1
+    final_boss, final_hp, final_max, final_bullets, final_missiles, final_timer = None, 80, 80, [], [], 0
+
+    # 호위 전투기: [rect, state, speed_y, hp]
+    # state: 'idle'(보스 옆 대기) / 'charge'(돌진 중) / 'return'(복귀 중)
+    escort_jets = []   # 최대 2대
+    escort_cd  = 0     # 호위기 발진 쿨다운
+
+    boss1_spawned = boss2_spawned = final_spawned = False
+    final_warning_shown = False
+    score, lives = 0, 5
+    shoot_cd = skill_cd = shield_cd = shield = 0
+    invul_timer = 0
+    ani_timer = ani_idx = 0
+
+    sand_particles = [[random.randint(0, WIDTH), random.randint(0, HEIGHT), random.randint(3, 7)] for _ in range(120)]
+
+    was_moving = False
+
+    play_bgm()
+
+    while True:
+        dt = clock.tick(FPS)
+        moving = False
+
+        for e in pygame.event.get():
+            if e.type == pygame.QUIT: pygame.quit(); sys.exit()
+
+        keys = pygame.key.get_pressed()
+        SPEED = 9  # 플레이어 속도 증가
+        if keys[pygame.K_LEFT]  and player.left  > 0:      player.x -= SPEED; moving = True
+        if keys[pygame.K_RIGHT] and player.right  < WIDTH:  player.x += SPEED; moving = True
+        if keys[pygame.K_UP]    and player.top    > 0:      player.y -= SPEED; moving = True
+        if keys[pygame.K_DOWN]  and player.bottom < HEIGHT: player.y += SPEED; moving = True
+
+        # 탱크 이동 효과음 (루프)
+        if snd_tankmove and tankmove_channel:
+            if moving and not was_moving:
+                tankmove_channel.play(snd_tankmove, loops=-1)
+            elif not moving and was_moving:
+                tankmove_channel.stop()
+        was_moving = moving
+
+        ani_timer += dt
+        if ani_timer > 120: ani_idx, ani_timer = (ani_idx + 1) % 4, 0
+
+        for p in sand_particles:
+            p[1] += p[2]
+            if p[1] > HEIGHT: p[1], p[0] = -10, random.randint(0, WIDTH)
+
+        shoot_cd -= 1; skill_cd -= 1; shield_cd -= 1; shield -= 1
+        if invul_timer > 0: invul_timer -= 1
+
+        if keys[pygame.K_SPACE] and shoot_cd <= 0:
+            bullets.append(pygame.Rect(player.centerx-3, player.top, 6, 14))
+            shoot_cd = 10
+            # 전용 채널로 재생 - 이전 소리가 끝났을 때만 재생해 중첩 방지
+            if snd_ammo and ammo_channel and not ammo_channel.get_busy():
+                ammo_channel.play(snd_ammo)
+
+        if keys[pygame.K_e] and skill_cd <= 0:
+            missiles.append(pygame.Rect(player.centerx-15, player.top, 30, 60))
+            skill_cd = FPS * 12
+            if snd_missile:
+                snd_missile.play()
+
+        if keys[pygame.K_f] and shield_cd <= 0:
+            shield, shield_cd = FPS * 3, FPS * 10
+
+        level = score // 60 + 1
+
+        # 보스 스폰
+        if level >= 5 and level < 10 and not boss1_spawned:
+            enemies.clear()
+            boss1 = pygame.Rect(WIDTH//2 - 200, 40, 400, 280)
+            boss1_spawned = True
+
+        if level >= 10 and level < 15 and not boss2_spawned:
+            enemies.clear(); boss1 = None
+            boss2 = pygame.Rect(WIDTH//2 - 210, 50, 420, 300)
+            boss2_spawned = True
+
+        if level >= 15 and not final_spawned:
+            enemies.clear(); boss2 = None
+            if not final_warning_shown:
+                if tankmove_channel:
+                    tankmove_channel.stop()
+                show_final_boss_warning()
+                final_warning_shown = True
+            final_boss = pygame.Rect(WIDTH//2 - 180, 60, 360, 300)
+            final_spawned = True
+
+        if not (boss1 or boss2 or final_boss):
+            if random.random() < 0.02:
+                enemies.append(pygame.Rect(random.randint(0, WIDTH-80), -80, 80, 80))
+
+        # 이동
+        for b in bullets[:]: b.y -= 10
+        for m in missiles[:]: m.y -= 5
+        for e in enemies[:]: e.y += 2
+
+        # 보스1 - 5발 부채꼴
+        if boss1:
+            boss1_timer += 1
+            if boss1_timer % 90 == 0:
+                angles = [-2.5, -1.2, 0, 1.2, 2.5]
+                for dx in angles:
+                    boss1_bombs.append([pygame.Rect(boss1.centerx-10, boss1.bottom-80, 20, 20), dx, 5])
+
+        # 보스2 - 이동 폭 제한 (화면 밖 나가지 않게)
+        if boss2:
+            boss2.x += boss2_dir * 3.5
+            if boss2.left < 50: boss2.left = 50; boss2_dir = 1
+            if boss2.right > WIDTH - 50: boss2.right = WIDTH - 50; boss2_dir = -1
+            boss2_timer += 1
+            if boss2_timer % 40 == 0:
+                boss2_bombs.append([pygame.Rect(boss2.centerx, boss2.bottom - 50, 15, 15), 0, 6])
+
+        if final_boss:
+            final_timer += 1
+            final_boss.centerx = WIDTH // 2 + math.sin(final_timer * 0.02) * 200
+            if final_timer % 30 == 0:
+                final_bullets.append([pygame.Rect(random.randint(final_boss.left, final_boss.right), final_boss.bottom - 50, 12, 12), 0, 7])
+            if final_timer % 120 == 0:
+                final_missiles.append([pygame.Rect(final_boss.centerx-10, final_boss.bottom - 80, 20, 40), 0, 4])
+
+            # 호위 전투기 발진 (180프레임마다, 최대 2대 동시)
+            escort_cd -= 1
+            if escort_cd <= 0 and len(escort_jets) < 2:
+                escort_cd = 180
+                # 왼쪽, 오른쪽 각각 발진
+                for side in [-1, 1]:
+                    ex = final_boss.centerx + side * 280
+                    ey = final_boss.centery
+                    escort_jets.append({
+                        'rect': pygame.Rect(ex - 100, ey - 100, 200, 200),
+                        'state': 'charge',
+                        'vy': 7,          # 돌진 속도
+                        'hp': 3,
+                        'side': side,
+                    })
+
+            # 호위기 업데이트
+            for jet in escort_jets[:]:
+                if jet['state'] == 'charge':
+                    jet['rect'].y += jet['vy']
+                    # 화면 밖으로 나가면 제거
+                    if jet['rect'].top > HEIGHT + 50:
+                        escort_jets.remove(jet)
+                        continue
+                # 보스 옆 위치로 X 동기화 (보스가 좌우로 움직이므로)
+                if jet['state'] == 'charge':
+                    jet['rect'].centerx = final_boss.centerx + jet['side'] * 280
+
+        for b_data in boss1_bombs: b_data[0].x += b_data[1]; b_data[0].y += b_data[2]
+        for b_data in boss2_bombs: b_data[0].y += b_data[2]
+        for b_data in final_bullets: b_data[0].y += b_data[2]
+        for b_data in final_missiles: b_data[0].y += b_data[2]
+
+        # 충돌
+        if invul_timer <= 0:
+            for d in enemies + [b[0] for b in boss1_bombs] + [b[0] for b in boss2_bombs] + [b[0] for b in final_bullets] + [b[0] for b in final_missiles]:
+                if d.colliderect(player):
+                    if shield <= 0: lives -= 1; invul_timer = FPS
+                    if d in enemies: enemies.remove(d)
+                    break
+            # 호위기 충돌
+            for jet in escort_jets[:]:
+                if jet['rect'].colliderect(player):
+                    if shield <= 0: lives -= 1; invul_timer = FPS
+                    break
+
+        for b in bullets[:]:
+            hit_boss = False
+            if boss1 and b.colliderect(boss1): boss1_hp -= 1; hit_boss = True
+            elif boss2 and b.colliderect(boss2): boss2_hp -= 1; hit_boss = True
+            elif final_boss and b.colliderect(final_boss): final_hp -= 1; hit_boss = True
+            if hit_boss: bullets.remove(b)
+            else:
+                # 호위기 피격
+                jet_hit = False
+                for jet in escort_jets[:]:
+                    if b.colliderect(jet['rect']):
+                        jet['hp'] -= 1
+                        if jet['hp'] <= 0:
+                            explosions.append([jet['rect'].centerx, jet['rect'].centery, 20])
+                            escort_jets.remove(jet)
+                        bullets.remove(b); jet_hit = True; break
+                if jet_hit: continue
+                for e in enemies[:]:
+                    if b.colliderect(e):
+                        enemies.remove(e); score += 30
+                        explosions.append([e.centerx, e.centery, 10]); bullets.remove(b); break
+
+        for m in missiles[:]:
+            hit_boss = False
+            if boss1 and m.colliderect(boss1): boss1_hp -= 15; hit_boss = True
+            elif boss2 and m.colliderect(boss2): boss2_hp -= 15; hit_boss = True
+            elif final_boss and m.colliderect(final_boss): final_hp -= 15; hit_boss = True
+            if hit_boss: explosions.append([m.centerx, m.top, 40]); missiles.remove(m)
+            else:
+                # 호위기 미사일 피격
+                jet_hit = False
+                for jet in escort_jets[:]:
+                    if m.colliderect(jet['rect']):
+                        explosions.append([jet['rect'].centerx, jet['rect'].centery, 40])
+                        if jet in escort_jets: escort_jets.remove(jet)
+                        missiles.remove(m); jet_hit = True; break
+                if jet_hit: continue
+                for e in enemies[:]:
+                    if m.colliderect(e):
+                        enemies.remove(e); score += 30
+                        explosions.append([e.centerx, e.centery, 40]); missiles.remove(m); break
+
+        if lives <= 0:
+            if tankmove_channel: tankmove_channel.stop()
+            if show_end_screen("GAME OVER", "Press R to Restart / Q to Quit", RED): return
+
+        if boss1 and boss1_hp <= 0: boss1 = None; score += 50; boss1_bombs.clear()
+        if boss2 and boss2_hp <= 0: boss2 = None; score += 100; boss2_bombs.clear()
+        if final_boss and final_hp <= 0:
+            escort_jets.clear()
+            if tankmove_channel: tankmove_channel.stop()
+            if show_end_screen("MISSION COMPLETE", "Press R to Play Again", BLUE): return
+
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        # 그리기
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        screen.fill(SAND_COLOR)
+        for p in sand_particles: pygame.draw.circle(screen, SAND_DUST, (p[0], p[1]), 2)
+
+        if boss1:
+            screen.blit(boss1_frames[ani_idx], boss1_frames[ani_idx].get_rect(center=boss1.center))
+            pygame.draw.rect(screen, RED, (WIDTH//2-160, 20, int(320*(max(0, boss1_hp/boss1_max))), 12))
+            pygame.draw.rect(screen, WHITE, (WIDTH//2-160, 20, 320, 12), 1)
+        if boss2:
+            screen.blit(boss2_frames[ani_idx], boss2_frames[ani_idx].get_rect(center=boss2.center))
+            pygame.draw.rect(screen, GREEN, (WIDTH//2-160, 20, int(320*(max(0, boss2_hp/boss2_max))), 12))
+            pygame.draw.rect(screen, WHITE, (WIDTH//2-160, 20, 320, 12), 1)
+        if final_boss:
+            screen.blit(boss3_frames[ani_idx], boss3_frames[ani_idx].get_rect(center=final_boss.center))
+            pygame.draw.rect(screen, BLUE, (WIDTH//2-160, 20, int(320*(max(0, final_hp/final_max))), 16))
+            pygame.draw.rect(screen, WHITE, (WIDTH//2-160, 20, 320, 16), 1)
+            # 호위 전투기 그리기
+            for jet in escort_jets:
+                screen.blit(escort_frames[ani_idx], escort_frames[ani_idx].get_rect(center=jet['rect'].center))
+                # HP 바 (작게)
+                hp_w = int(80 * jet['hp'] / 3)
+                pygame.draw.rect(screen, (80,80,80), (jet['rect'].centerx - 40, jet['rect'].top - 12, 80, 6))
+                pygame.draw.rect(screen, GREEN, (jet['rect'].centerx - 40, jet['rect'].top - 12, hp_w, 6))
+
+        if invul_timer % 10 < 5:
+            screen.blit(player_frames[ani_idx if moving else 3], (player.centerx-130, player.centery-130))
+
+        for e in enemies: screen.blit(enemy_frames[ani_idx], enemy_frames[ani_idx].get_rect(center=e.center))
+        for b in bullets: pygame.draw.rect(screen, YELLOW, b)
+
+        for m in missiles:
+            target_rect = ammo_img.get_rect(center=m.center)
+            screen.blit(ammo_img, target_rect)
+
+        for b_data in boss1_bombs: pygame.draw.circle(screen, RED, b_data[0].center, 10)
+        for b_data in boss2_bombs: pygame.draw.circle(screen, GREEN, b_data[0].center, 12)
+        for b_data in final_bullets: pygame.draw.circle(screen, YELLOW, b_data[0].center, 8)
+
+        for m_data in final_missiles:
+            target_rect = boss3_ammo_img.get_rect(center=m_data[0].center)
+            screen.blit(boss3_ammo_img, target_rect)
+
+        for ex in explosions[:]:
+            pygame.draw.circle(screen, ORANGE, (ex[0], ex[1]), int(ex[2]))
+            ex[2] += 3
+            if ex[2] > 60: explosions.remove(ex)
+
+        # UI
+        screen.blit(font.render(f"Score: {score}  |  Level: {level}", True, (40, 20, 0)), (32, 32))
+        screen.blit(font.render(f"Score: {score}  |  Level: {level}", True, YELLOW), (30, 30))
+        screen.blit(font.render("♥ " * lives, True, RED), (30, 70))
+
+        ui_bg = pygame.Surface((WIDTH, 50), pygame.SRCALPHA)
+        ui_bg.fill((0, 0, 0, 100))
+        screen.blit(ui_bg, (0, HEIGHT-50))
+        screen.blit(font_small.render("ARROWS: Move | SPACE: Fire | E: Missile | F: Shield", True, WHITE), (30, HEIGHT-36))
+
+        skill_info = [("E", skill_cd, FPS*12, RED), ("F", shield_cd, FPS*10, BLUE)]
+        for i, (label, cd, max_cd, color) in enumerate(skill_info):
+            bx, by = WIDTH - 160 + (i*75), HEIGHT - 120
+            pygame.draw.rect(screen, (30, 30, 50), (bx, by, 55, 55), 0, 5)
+            pygame.draw.rect(screen, WHITE, (bx, by, 55, 55), 1, 5)
+            if cd > 0:
+                h = int(55 * (cd/max_cd))
+                s = pygame.Surface((55, h), pygame.SRCALPHA)
+                s.fill((*color, 180))
+                screen.blit(s, (bx, by + 55 - h))
+                screen.blit(font.render(str(max(0, cd//FPS+1)), True, WHITE), (bx+18, by+14))
+            else:
+                screen.blit(font.render(label, True, WHITE), (bx+18, by+14))
+
+        if shield > 0:
+            pygame.draw.arc(screen, BLUE, (player.x-20, player.y-20, 80, 80), 0, 3.14, 4)
+
+        pygame.display.flip()
+
+if __name__ == "__main__":
+    while True:
+        result = show_intro()
+        if result == "play":
+            main()
+
